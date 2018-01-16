@@ -9,10 +9,10 @@ import numpy as np
 
 WORD_EMBED_SIZE = 300
 SNLI_VOCAB_SIZE = 40000 # 42378 - real size
-BATCH_SIZE = 250
+BATCH_SIZE = 250 #250
 WORD_EMBED_SIZE = 150 # 300 IN PYTOCH MODEL
 EPOCHS = 2
-EVALUATE_ITERATION = 500
+EVALUATE_ITERATION = 1#500
 
 CHATS_TO_SKIP = ',?'
 SEPERATION_STR = '$$$'
@@ -67,9 +67,14 @@ def get_train_set(file_name):
             vocab.append(word)
         for word in parts[1]:
             vocab.append(word)
-        trainset.append((parts[0], parts[1], parts[2]))
-    make_sure_labels_are_numbers(trainset)
+        trainset.append([parts[0], parts[1], int(parts[2])])
+    # make_sure_labels_are_numbers(trainset)
     return vocab, trainset
+
+
+def get_word_rep(word, holder):
+    w_index = holder.word2index[word] if word in holder.word2index else holder.word2index[UNKNOWN_WORD]
+    return holder.word_embedding[w_index]
 
 
 class ComponentHolder:
@@ -89,29 +94,69 @@ class ComponentHolder:
         self.word_embedding = word_embedding
 
 def build_graph(pre_words, hy_words, holder):
-    dy.renew_cg()
+    # dy.renew_cg()
     fl1_init = holder.fwdRNN_layer1.initial_state()
     bl1_init = holder.bwdRNN_layer1.initial_state()
     fl2_init = holder.fwdRNN_layer2.initial_state()
     bl2_init = holder.bwdRNN_layer2.initial_state()
+    fl3_init = holder.fwdRNN_layer3.initial_state()
+    bl3_init = holder.bwdRNN_layer3.initial_state()
 
-    wembs = [get_word_rep(w, holder) for w in words]
+    pre_wembs = [get_word_rep(w, holder) for w in pre_words]
+    hy_wembs = [get_word_rep(w, holder) for w in hy_words]
+
     # if is_training:
     #     wembs = [dy.dropout(w, 0.1) for w in wembs]
-    fws = fl1_init.transduce(wembs)
-    bws = bl1_init.transduce(reversed(wembs))
+    pre_fws = fl1_init.transduce(pre_wembs)
+    pre_bws = bl1_init.transduce(reversed(pre_wembs))
 
-    bi = [dy.concatenate([f, b]) for f, b in zip(fws, reversed(bws))]
-    fws2 = fl2_init.transduce(bi)
-    bws2 = bl2_init.transduce(reversed(bi))
+    pre_bi = [dy.concatenate([word, f, b]) for word, f, b in zip(pre_wembs, pre_fws, reversed(pre_bws))]
+    pre_fws2 = fl2_init.transduce(pre_bi)
+    pre_bws2 = bl2_init.transduce(reversed(pre_bi))
+
+    pre_b_tag = [dy.concatenate([word, f1, b1, f2, b2]) for word, f1, b1, f2, b2 in zip(pre_wembs, pre_fws, reversed(pre_bws), pre_fws2, reversed(pre_bws2))]
+    pre_fws3 = fl3_init.transduce(pre_b_tag)
+    pre_bws3 = bl3_init.transduce(reversed(pre_b_tag))
+
+    pre_b_tagtag = [dy.concatenate([f3, b3]) for f3, b3 in zip(pre_fws3, reversed(pre_bws3))]
+
+    pre_v_elemets_size = len(pre_b_tagtag[0].npvalue())
+    pre_row_num = len(pre_b_tagtag)
+    pre_vecs_concat = dy.concatenate([v for v in pre_b_tagtag])
+    pre_mat = dy.reshape(pre_vecs_concat, (pre_v_elemets_size, pre_row_num))
+    pre_final = dy.concatenate([dy.kmax_pooling(v, 1, 0) for v in pre_mat])
+
+    hy_fws = fl1_init.transduce(hy_wembs)
+    hy_bws = bl1_init.transduce(reversed(hy_wembs))
+
+    hy_bi = [dy.concatenate([word, f, b]) for word, f, b in zip(hy_wembs, hy_fws, reversed(hy_bws))]
+    hy_fws2 = fl2_init.transduce(hy_bi)
+    hy_bws2 = bl2_init.transduce(reversed(hy_bi))
+
+    hy_b_tag = [dy.concatenate([word, f1, b1, f2, b2]) for word, f1, b1, f2, b2 in zip(hy_wembs, hy_fws, reversed(hy_bws), hy_fws2, reversed(hy_bws2))]
+    hy_fws3 = fl3_init.transduce(hy_b_tag)
+    hy_bws3 = bl3_init.transduce(reversed(hy_b_tag))
+
+    hy_b_tagtag = [dy.concatenate([f3, b3]) for f3, b3 in zip(hy_fws3, reversed(hy_bws3))]
+
+    hy_v_elemets_size = len(hy_b_tagtag[0].npvalue())
+    hy_row_num = len(hy_b_tagtag)
+    hy_vecs_concat = dy.concatenate([v for v in hy_b_tagtag])
+    hy_mat = dy.reshape(hy_vecs_concat, (hy_v_elemets_size, hy_row_num))
+    hy_final = dy.concatenate([dy.kmax_pooling(v, 1, 0) for v in hy_mat])
+
+    final = dy.concatenate([pre_final, hy_final, dy.abs(pre_final - hy_final), dy.cmult(pre_final, hy_final)])
 
 
-    b_tag = [dy.concatenate([f2, b2]) for f2, b2 in zip(fws2, reversed(bws2))]
-    W_ab1 = dy.parameter(holder.W_ab1)
-    b_ab1 = dy.parameter(holder.b_ab1)
+    W1 = dy.parameter(holder.W1)
+    b1 = dy.parameter(holder.b1)
+    W2 = dy.parameter(holder.W2)
+    b2 = dy.parameter(holder.b2)
+    # needs to be fixed (another layer + dropout)
+    mid = dy.rectify(W1 * final + b1)
     # if is_training:
     #     b_tag = [dy.dropout(b, 0.1) for b in b_tag]
-    return [(W_ab1 * x + b_ab1) for x in b_tag]
+    return W2 * mid + b2
 
 
 def predict_tags(pre_words, hy_words, holder):
@@ -126,25 +171,27 @@ def predict_tags(pre_words, hy_words, holder):
 def evaluate_set(dev_batches, holder):
     good = 0.0
     bad = 0.0
-    for pre_sentence, hy_sentence, tag in dev_batches:
-        pre_words = [word for word in pre_sentence]
-        hy_words = [word for word in hy_sentence]
+    for item in dev_batches:
+        for pre_sentence, hy_sentence, tag in item:
+            pre_words = [word for word in pre_sentence]
+            hy_words = [word for word in hy_sentence]
 
-        predicted_tag = predict_tags(pre_words, hy_words, holder)
-        if tag == predicted_tag:
-            good += 1
-        else:
-            bad += 1
+            predicted_tag = predict_tags(pre_words, hy_words, holder)
+            if tag == predicted_tag:
+                good += 1
+            else:
+                bad += 1
     return good / (good + bad)
 
 # maybe write calc_batch_loss and calculate the loss for the whole batch
 def calc_loss(pre_words, hy_words, tag,  holder):
     vec = build_graph(pre_words, hy_words, holder)
-    losses = []
+    # losses = []
     # tid = holder.tag2index[t]
     loss = dy.pickneglogsoftmax(vec, tag)
-    losses.append(loss)
-    return dy.esum(losses)
+    return loss
+    # losses.append(loss)
+    # return dy.esum(losses)
 
 def ensure_directory_exists(directory_path):
     if not os.path.exists(directory_path):
@@ -206,13 +253,13 @@ def main():
     fwdRNN_layer3 = dy.LSTMBuilder(layers=1, input_dim=WORD_EMBED_SIZE + (l1_hidden_dim + l2_hidden_dim) * 2, hidden_dim=l3_hidden_dim, model=model)
     bwdRNN_layer3 = dy.LSTMBuilder(layers=1, input_dim=WORD_EMBED_SIZE + (l1_hidden_dim + l2_hidden_dim) * 2, hidden_dim=l3_hidden_dim, model=model)
 
-    W1 = model.add_parameters(l3_hidden_dim * 2 * 4, mlpd)
+    W1 = model.add_parameters((mlpd, l3_hidden_dim * 2 * 4))
     b1 = model.add_parameters(mlpd)
 
-    W2 = model.add_parameters(mlpd, 3)
+    W2 = model.add_parameters((3, mlpd))
     b2 = model.add_parameters(3)
 
-    holder = ComponentHolder(word2index, fwdRNN_layer1, bwdRNN_layer1, fwdRNN_layer2, bwdRNN_layer2, fwdRNN_layer3, bwdRNN_layer3,W1, b1, W2, b2, word_embedding)
+    holder = ComponentHolder(word2index, fwdRNN_layer1, bwdRNN_layer1, fwdRNN_layer2, bwdRNN_layer2, fwdRNN_layer3, bwdRNN_layer3, W1, b1, W2, b2, word_embedding)
 
     start_training_time = datetime.now()
     current_date = start_training_time.strftime("%d.%m.%Y")
@@ -223,14 +270,19 @@ def main():
         pretrain_time = datetime.now()
         random.shuffle(train_batches)
         for i, tuple in enumerate(train_batches, 1):
+            dy.renew_cg()
+            losses = []
             if i % EVALUATE_ITERATION == 0:
                 eval = evaluate_set(dev_batches, holder)
                 evaluation_results.append(eval)
                 print 'epoch {}, batch {}, validation evaluation {}'.format(iter + 1, i, eval)
-            pre_words = [word for word in tuple[0]]
-            hy_words = [word for word in tuple[1]]
-            tag = tuple[2]
-            loss_exp = calc_loss(pre_words, hy_words, tag,  holder)
+            for i, item in enumerate(tuple):
+                pre_words = [word for word in item[0]]
+                hy_words = [word for word in item[1]]
+                tag = item[2]
+                loss = calc_loss(pre_words, hy_words, tag,  holder)
+                losses.append(loss)
+            loss_exp = dy.esum(losses) / len(losses)  # check if should be converted to float
             loss_exp.backward()
             trainer.update()
         print 'epoch took: ' + str(datetime.now() - pretrain_time)
