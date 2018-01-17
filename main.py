@@ -6,11 +6,12 @@ import sys
 from enum import Enum
 from collections import Counter
 import numpy as np
+import gc
 
-WORD_EMBED_SIZE = 300
+# WORD_EMBED_SIZE = 300
 SNLI_VOCAB_SIZE = 40000 # 42378 - real size
-BATCH_SIZE = 250 #250
-WORD_EMBED_SIZE = 150 # 300 IN PYTOCH MODEL
+BATCH_SIZE = 500 #250
+WORD_EMBED_SIZE = 120 # 300 IN PYTOCH MODEL
 EPOCHS = 2
 EVALUATE_ITERATION = 1#500
 
@@ -28,10 +29,8 @@ class TrainingOn(Enum):
 
 
 # args[1] => use pretrained
-def make_sure_labels_are_numbers(trainset):
-    for t in trainset:
-        if not str.isdigit(t[2]):
-            raise Exception("One or more labels is not a digit")
+def make_sure_labels_are_0_2(trainset):
+    return [t for t in trainset if t[2] != 3]
 
 
 def get_rare_words(words, vocab_size):
@@ -68,7 +67,7 @@ def get_train_set(file_name):
         for word in parts[1]:
             vocab.append(word)
         trainset.append([parts[0], parts[1], int(parts[2])])
-    # make_sure_labels_are_numbers(trainset)
+    trainset = make_sure_labels_are_0_2(trainset)
     return vocab, trainset
 
 
@@ -167,11 +166,32 @@ def predict_tags(pre_words, hy_words, holder):
     # tags.append(holder.index2tag[tag])
     return tag
 
+def evaluate_testset(testset, holder):
+    good = 0.0
+    bad = 0.0
+    for i, (pre_sentence, hy_sentence, tag) in enumerate(testset):
+        # gc.collect()
+        dy.renew_cg()
+        print 'evaluate item {}'.format(i)
+        if i % 100 == 1:
+            print 'good / (good + bad) = {}'.format(good / (good + bad))
+        pre_words = [word for word in pre_sentence]
+        hy_words = [word for word in hy_sentence]
+
+        predicted_tag = predict_tags(pre_words, hy_words, holder)
+        if tag == predicted_tag:
+            good += 1
+        else:
+            bad += 1
+    return good / (good + bad)
+
 
 def evaluate_set(dev_batches, holder):
     good = 0.0
     bad = 0.0
-    for item in dev_batches:
+    for i, item in enumerate(dev_batches):
+        gc.collect()
+        print 'evaluate batch {}'.format(i)
         for pre_sentence, hy_sentence, tag in item:
             pre_words = [word for word in pre_sentence]
             hy_words = [word for word in hy_sentence]
@@ -215,12 +235,13 @@ def main():
     #     return None
     # else:
     vocab, trainset = get_train_set('data/snli/sequence/train.txt')
-    _, devset = get_train_set('data/snli/sequence/dev.txt')
+    # _, devset = get_train_set('data/snli/sequence/dev.txt')
     _, testset = get_train_set('data/snli/sequence/test.txt')
     rare_words = get_rare_words(vocab, SNLI_VOCAB_SIZE)
 
     train_batches = split_into_batches(trainset, BATCH_SIZE)
-    dev_batches = split_into_batches(devset, BATCH_SIZE)
+    # dev_batches = split_into_batches(devset, BATCH_SIZE)
+    test_bathces = split_into_batches(testset, BATCH_SIZE)
 
     vocab = set(vocab)
     for word in rare_words:
@@ -236,11 +257,11 @@ def main():
     model = dy.Model()
     trainer = dy.AdamTrainer(model)
 
-    l1_hidden_dim = 300
-    l2_hidden_dim = 600
-    l3_hidden_dim = 900
+    l1_hidden_dim = 200
+    l2_hidden_dim = 500
+    l3_hidden_dim = 800
 
-    mlpd = 1200
+    mlpd = 1000
 
     word_embedding = model.add_lookup_parameters((vocab_size, WORD_EMBED_SIZE))
 
@@ -264,18 +285,20 @@ def main():
     start_training_time = datetime.now()
     current_date = start_training_time.strftime("%d.%m.%Y")
     current_time = start_training_time.strftime("%H:%M:%S")
+    print 'start time: {}'.format(start_training_time)
 
-    evaluation_results = []
+    # evaluation_results = []
     for iter in xrange(EPOCHS):
         pretrain_time = datetime.now()
         random.shuffle(train_batches)
         for i, tuple in enumerate(train_batches, 1):
+            print 'working on batch {}. time since start {}'.format(i, datetime.now() - start_training_time)
             dy.renew_cg()
             losses = []
-            if i % EVALUATE_ITERATION == 0:
-                eval = evaluate_set(dev_batches, holder)
-                evaluation_results.append(eval)
-                print 'epoch {}, batch {}, validation evaluation {}'.format(iter + 1, i, eval)
+            # if i % EVALUATE_ITERATION == 0:
+            #     eval = evaluate_set(dev_batches, holder)
+            #     evaluation_results.append(eval)
+            #     print 'epoch {}, batch {}, validation evaluation {}'.format(iter + 1, i, eval)
             for i, item in enumerate(tuple):
                 pre_words = [word for word in item[0]]
                 hy_words = [word for word in item[1]]
@@ -290,7 +313,9 @@ def main():
     total_training_time = datetime.now() - start_training_time
     print 'total training time was {}'.format(total_training_time)
 
-    save_results_and_model(evaluation_results, current_date, current_time, total_training_time, model)
+    print 'test result is {}'.format(evaluate_testset(testset, holder))
+
+    # save_results_and_model(evaluation_results, current_date, current_time, total_training_time, model)
 
 
 if __name__ == '__main__':
