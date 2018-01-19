@@ -10,7 +10,7 @@ def prepSNLI():
 		fpr = open('data/snli/snli_1.0/snli_1.0_'+filename+'.txt', 'r')
 		count = 0
 		fpr.readline()
-		fpw = open('data/snli/sequence/'+filename+'.txt', 'w')
+		fpw = open('data/snli/processed_data/'+filename+'.txt', 'w')
 		for line in fpr:
 			sentences = line.strip().split('\t')
 			if sentences[3] == '-':

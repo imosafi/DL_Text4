@@ -10,10 +10,13 @@ import gc
 
 # WORD_EMBED_SIZE = 300
 SNLI_VOCAB_SIZE = 40000 # 42378 - real size
-BATCH_SIZE = 500 #250
-WORD_EMBED_SIZE = 120 # 300 IN PYTOCH MODEL
-EPOCHS = 2
-EVALUATE_ITERATION = 1#500
+BATCH_SIZE = 32 #250
+WORD_EMBED_SIZE = 150 # 300 IN PYTOCH MODEL
+EPOCHS = 5
+EVALUATE_ITERATION = 100#500
+
+dev_evaluation_file = 'dev_eval.txt'
+test_evaluation_file = 'test_eval.txt'
 
 CHATS_TO_SKIP = ',?'
 SEPERATION_STR = '$$$'
@@ -29,7 +32,7 @@ class TrainingOn(Enum):
 
 
 # args[1] => use pretrained
-def make_sure_labels_are_0_2(trainset):
+def take_labels_0_1_2(trainset):
     return [t for t in trainset if t[2] != 3]
 
 
@@ -67,7 +70,7 @@ def get_train_set(file_name):
         for word in parts[1]:
             vocab.append(word)
         trainset.append([parts[0], parts[1], int(parts[2])])
-    trainset = make_sure_labels_are_0_2(trainset)
+    trainset = take_labels_0_1_2(trainset)
     return vocab, trainset
 
 
@@ -91,6 +94,7 @@ class ComponentHolder:
         self.W2 = W2
         self.b2 = b2
         self.word_embedding = word_embedding
+
 
 def build_graph(pre_words, hy_words, holder):
     # dy.renew_cg()
@@ -166,18 +170,14 @@ def predict_tags(pre_words, hy_words, holder):
     # tags.append(holder.index2tag[tag])
     return tag
 
-def evaluate_testset(testset, holder):
+
+def evaluate_set2(set, holder):
     good = 0.0
     bad = 0.0
-    for i, (pre_sentence, hy_sentence, tag) in enumerate(testset):
-        # gc.collect()
+    for i, (pre_sentence, hy_sentence, tag) in enumerate(set):
         dy.renew_cg()
-        print 'evaluate item {}'.format(i)
-        if i % 100 == 1:
-            print 'good / (good + bad) = {}'.format(good / (good + bad))
         pre_words = [word for word in pre_sentence]
         hy_words = [word for word in hy_sentence]
-
         predicted_tag = predict_tags(pre_words, hy_words, holder)
         if tag == predicted_tag:
             good += 1
@@ -203,45 +203,43 @@ def evaluate_set(dev_batches, holder):
                 bad += 1
     return good / (good + bad)
 
-# maybe write calc_batch_loss and calculate the loss for the whole batch
+
 def calc_loss(pre_words, hy_words, tag,  holder):
     vec = build_graph(pre_words, hy_words, holder)
-    # losses = []
-    # tid = holder.tag2index[t]
     loss = dy.pickneglogsoftmax(vec, tag)
     return loss
-    # losses.append(loss)
-    # return dy.esum(losses)
 
 def ensure_directory_exists(directory_path):
     if not os.path.exists(directory_path):
         os.makedirs(directory_path)
 
 
-def save_results_and_model(evaluation_results, current_date, current_time, total_training_time, model):
-    path = 'results/{}_{}'.format(current_date, current_time)
-    ensure_directory_exists(path)
-    with open(path + '/results.txt', 'w') as f:
-        f.write('total training time: {}\n'.format(total_training_time))
-        f.write('num of epochs: {}\n'.format(EPOCHS))
-        f.write('evaluated every: {}\n'.format(EVALUATE_ITERATION))
-    with open(path + '/' + 'evaluation.txt', 'w') as f:
-        f.write(''.join([str(x) + ' ' for x in evaluation_results]))
-    model.save(path + '/' + 'model1')
+# def save_results_and_model(evaluation_results, current_date, current_time, total_training_time, model):
+#     path = 'results/{}_{}'.format(current_date, current_time)
+#     ensure_directory_exists(path)
+#     with open(path + '/results.txt', 'w') as f:
+#         f.write('total training time: {}\n'.format(total_training_time))
+#         f.write('num of epochs: {}\n'.format(EPOCHS))
+#         f.write('evaluated every: {}\n'.format(EVALUATE_ITERATION))
+#     with open(path + '/' + 'evaluation.txt', 'w') as f:
+#         f.write(''.join([str(x) + ' ' for x in evaluation_results]))
+#     model.save(path + '/' + 'model1')
 
 
 def main():
     # if sys.argv[1] == 1:
     #     return None
     # else:
+    print 'reading and processing data'
     vocab, trainset = get_train_set('data/snli/sequence/train.txt')
-    # _, devset = get_train_set('data/snli/sequence/dev.txt')
+    _, devset = get_train_set('data/snli/sequence/dev.txt')
     _, testset = get_train_set('data/snli/sequence/test.txt')
     rare_words = get_rare_words(vocab, SNLI_VOCAB_SIZE)
 
+
     train_batches = split_into_batches(trainset, BATCH_SIZE)
     # dev_batches = split_into_batches(devset, BATCH_SIZE)
-    test_bathces = split_into_batches(testset, BATCH_SIZE)
+    # test_bathces = split_into_batches(testset, BATCH_SIZE)
 
     vocab = set(vocab)
     for word in rare_words:
@@ -252,16 +250,18 @@ def main():
     word2index = {c: i for i, c in enumerate(vocab)}
     vocab_size = len(vocab)
 
+    ensure_directory_exists('results')
+
     # create label2index - not needed since the labels are exactly the numbers
 
     model = dy.Model()
     trainer = dy.AdamTrainer(model)
 
-    l1_hidden_dim = 200
-    l2_hidden_dim = 500
-    l3_hidden_dim = 800
+    l1_hidden_dim = 64
+    l2_hidden_dim = 128
+    l3_hidden_dim = 256
 
-    mlpd = 1000
+    mlpd = 512
 
     word_embedding = model.add_lookup_parameters((vocab_size, WORD_EMBED_SIZE))
 
@@ -287,7 +287,6 @@ def main():
     current_time = start_training_time.strftime("%H:%M:%S")
     print 'start time: {}'.format(start_training_time)
 
-    # evaluation_results = []
     for iter in xrange(EPOCHS):
         pretrain_time = datetime.now()
         random.shuffle(train_batches)
@@ -295,10 +294,17 @@ def main():
             print 'working on batch {}. time since start {}'.format(i, datetime.now() - start_training_time)
             dy.renew_cg()
             losses = []
-            # if i % EVALUATE_ITERATION == 0:
-            #     eval = evaluate_set(dev_batches, holder)
-            #     evaluation_results.append(eval)
-            #     print 'epoch {}, batch {}, validation evaluation {}'.format(iter + 1, i, eval)
+            if i % EVALUATE_ITERATION == 0:
+                print 'evaluating dev and test'
+                print 'start evaluation time: {}'.format(datetime.now())
+                dev_eval = evaluate_set2(devset, holder)
+                test_eval = evaluate_set2(testset, holder)
+                with open('results/' + dev_evaluation_file, 'a') as f:
+                    f.write(' ' + str(dev_eval))
+                with open('results/' + test_evaluation_file, 'a') as f:
+                    f.write(' ' + str(test_eval))
+                print 'finished evaluating'
+                print 'finished evaluation time: {}'.format(datetime.now())
             for i, item in enumerate(tuple):
                 pre_words = [word for word in item[0]]
                 hy_words = [word for word in item[1]]
@@ -312,8 +318,6 @@ def main():
 
     total_training_time = datetime.now() - start_training_time
     print 'total training time was {}'.format(total_training_time)
-
-    print 'test result is {}'.format(evaluate_testset(testset, holder))
 
     # save_results_and_model(evaluation_results, current_date, current_time, total_training_time, model)
 
