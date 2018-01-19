@@ -10,10 +10,12 @@ import gc
 
 # WORD_EMBED_SIZE = 300
 SNLI_VOCAB_SIZE = 40000 # 42378 - real size
-BATCH_SIZE = 32 #250
+BATCH_SIZE = 40 #250
 WORD_EMBED_SIZE = 150 # 300 IN PYTOCH MODEL
 EPOCHS = 5
-EVALUATE_ITERATION = 100#500
+EVALUATE_ITERATION = 200#500
+
+method = 'naive'
 
 dev_evaluation_file = 'dev_eval.txt'
 test_evaluation_file = 'test_eval.txt'
@@ -48,7 +50,7 @@ def split_into_batches(set, size):
 
 
 # naive implementation don't remove , ? etc.
-def get_train_set(file_name):
+def get_set(file_name):
     trainset = []
     vocab = []
     for line in file(file_name):
@@ -231,9 +233,9 @@ def main():
     #     return None
     # else:
     print 'reading and processing data'
-    vocab, trainset = get_train_set('data/snli/sequence/train.txt')
-    _, devset = get_train_set('data/snli/sequence/dev.txt')
-    _, testset = get_train_set('data/snli/sequence/test.txt')
+    vocab, trainset = get_set('data/snli/sequence/train.txt')
+    _, devset = get_set('data/snli/sequence/dev.txt')
+    _, testset = get_set('data/snli/sequence/test.txt')
     rare_words = get_rare_words(vocab, SNLI_VOCAB_SIZE)
 
 
@@ -291,7 +293,7 @@ def main():
         pretrain_time = datetime.now()
         random.shuffle(train_batches)
         for i, tuple in enumerate(train_batches, 1):
-            print 'working on batch {}. time since start {}'.format(i, datetime.now() - start_training_time)
+            print 'working on batch {}/{}. time since start {}'.format(i, len(train_batches), datetime.now() - start_training_time)
             dy.renew_cg()
             losses = []
             if i % EVALUATE_ITERATION == 0:
@@ -299,9 +301,9 @@ def main():
                 print 'start evaluation time: {}'.format(datetime.now())
                 dev_eval = evaluate_set2(devset, holder)
                 test_eval = evaluate_set2(testset, holder)
-                with open('results/' + dev_evaluation_file, 'a') as f:
+                with open('results/' + method + '_' + dev_evaluation_file, 'a') as f:
                     f.write(' ' + str(dev_eval))
-                with open('results/' + test_evaluation_file, 'a') as f:
+                with open('results/' + method + '_' + test_evaluation_file, 'a') as f:
                     f.write(' ' + str(test_eval))
                 print 'finished evaluating'
                 print 'finished evaluation time: {}'.format(datetime.now())
