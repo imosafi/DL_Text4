@@ -11,11 +11,11 @@ import gc
 # WORD_EMBED_SIZE = 300
 SNLI_VOCAB_SIZE = 40000 # 42378 - real size
 BATCH_SIZE = 40 #250
-WORD_EMBED_SIZE = 150 # 300 IN PYTOCH MODEL
+WORD_EMBED_SIZE = 300 # 300 IN PYTOCH MODEL
 EPOCHS = 5
-EVALUATE_ITERATION = 200#500
+EVALUATE_ITERATION = 800#500
 
-method = 'naive'
+method = 'pretrained'
 
 dev_evaluation_file = 'dev_eval.txt'
 test_evaluation_file = 'test_eval.txt'
@@ -25,6 +25,8 @@ SEPERATION_STR = '$$$'
 UNKNOWN_WORD = 'UnKnOwN_wOrD'
 
 labelDict = {'neutral': 0, 'entailment': 1, 'contradiction': 2, '-': 3}
+
+USE_PRETRINED = True
 
 
 class TrainingOn(Enum):
@@ -229,34 +231,48 @@ def ensure_directory_exists(directory_path):
 
 
 def main():
-    # if sys.argv[1] == 1:
-    #     return None
-    # else:
     print 'reading and processing data'
     vocab, trainset = get_set('data/snli/sequence/train.txt')
     _, devset = get_set('data/snli/sequence/dev.txt')
     _, testset = get_set('data/snli/sequence/test.txt')
     rare_words = get_rare_words(vocab, SNLI_VOCAB_SIZE)
-
+    ensure_directory_exists('results')
 
     train_batches = split_into_batches(trainset, BATCH_SIZE)
     # dev_batches = split_into_batches(devset, BATCH_SIZE)
     # test_bathces = split_into_batches(testset, BATCH_SIZE)
 
-    vocab = set(vocab)
-    for word in rare_words:
-        vocab.remove(word)
-    vocab.add(UNKNOWN_WORD)
-    vocab = list(vocab)
+    word2index = {}
+    vocab_size = None
+    word_embedding = None
+    vectors = []
+    if USE_PRETRINED:
+        with open("data/glove/glove.840B.300d.txt") as f:
+            f.readline()
+            for i, line in enumerate(f):
+                fields = line.strip().split(" ")
+                word2index[fields[0]] = i
+                vectors.append(list(map(float, fields[1:])))
 
-    word2index = {c: i for i, c in enumerate(vocab)}
-    vocab_size = len(vocab)
+        model = dy.Model()
+        word_embedding = model.add_lookup_parameters((len(vectors), len(vectors[0])))
+        word_embedding.init_from_array(np.array(vectors))
+    else:
+        vocab = set(vocab)
+        for word in rare_words:
+            vocab.remove(word)
+        vocab.add(UNKNOWN_WORD)
+        vocab = list(vocab)
 
-    ensure_directory_exists('results')
+        word2index = {c: i for i, c in enumerate(vocab)}
+        vocab_size = len(vocab)
+
+
 
     # create label2index - not needed since the labels are exactly the numbers
-
-    model = dy.Model()
+    if not USE_PRETRINED:
+        model = dy.Model()
+        word_embedding = model.add_lookup_parameters((vocab_size, WORD_EMBED_SIZE))
     trainer = dy.AdamTrainer(model)
 
     l1_hidden_dim = 64
@@ -265,7 +281,6 @@ def main():
 
     mlpd = 512
 
-    word_embedding = model.add_lookup_parameters((vocab_size, WORD_EMBED_SIZE))
 
     fwdRNN_layer1 = dy.LSTMBuilder(layers=1, input_dim=WORD_EMBED_SIZE, hidden_dim=l1_hidden_dim, model=model)
     bwdRNN_layer1 = dy.LSTMBuilder(layers=1, input_dim=WORD_EMBED_SIZE, hidden_dim=l1_hidden_dim, model=model)
@@ -293,9 +308,10 @@ def main():
         pretrain_time = datetime.now()
         random.shuffle(train_batches)
         for i, tuple in enumerate(train_batches, 1):
-            print 'working on batch {}/{}. time since start {}'.format(i, len(train_batches), datetime.now() - start_training_time)
             dy.renew_cg()
             losses = []
+            if i % 100 == 0:
+                print 'working on epoch {}, batch {}/{}. time since start {}'.format(iter + 1, i, len(train_batches), datetime.now() - start_training_time)
             if i % EVALUATE_ITERATION == 0:
                 print 'evaluating dev and test'
                 print 'start evaluation time: {}'.format(datetime.now())
