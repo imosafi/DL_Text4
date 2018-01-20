@@ -22,7 +22,8 @@ test_evaluation_file = 'test_eval.txt'
 
 CHATS_TO_SKIP = ',?'
 SEPERATION_STR = '$$$'
-UNKNOWN_WORD = 'UnKnOwN_wOrD'
+# UNKNOWN_WORD = 'UnKnOwN_wOrD'
+UNKNOWN_WORD = 'UNK'
 
 labelDict = {'neutral': 0, 'entailment': 1, 'contradiction': 2, '-': 3}
 
