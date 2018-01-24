@@ -15,7 +15,7 @@ WORD_EMBED_SIZE = 300 # 300 IN PYTOCH MODEL
 EPOCHS = 5
 EVALUATE_ITERATION = 800#500
 
-method = 'larger_layers'
+method = 'larger_layers_no_dropout'
 
 dev_evaluation_file = 'dev_eval.txt'
 test_evaluation_file = 'test_eval.txt'
@@ -86,7 +86,7 @@ def get_word_rep(word, holder):
 
 class ComponentHolder:
     def __init__(self, word2index, fwdRNN_layer1, bwdRNN_layer1, fwdRNN_layer2, bwdRNN_layer2, fwdRNN_layer3, bwdRNN_layer3,
-                 W1, b1, W12, b12, W2, b2, word_embedding):
+                 W1, b1, W2, b2, word_embedding):
         self.word2index = word2index
         self.fwdRNN_layer1 = fwdRNN_layer1
         self.bwdRNN_layer1 = bwdRNN_layer1
@@ -96,14 +96,12 @@ class ComponentHolder:
         self.bwdRNN_layer3 = bwdRNN_layer3
         self.W1 = W1
         self.b1 = b1
-        self.W12 = W12
-        self.b12 = b12
         self.W2 = W2
         self.b2 = b2
         self.word_embedding = word_embedding
 
 
-def build_graph(pre_words, hy_words, holder, is_training = True):
+def build_graph(pre_words, hy_words, holder):
     fl1_init = holder.fwdRNN_layer1.initial_state()
     bl1_init = holder.bwdRNN_layer1.initial_state()
     fl2_init = holder.fwdRNN_layer2.initial_state()
@@ -159,22 +157,17 @@ def build_graph(pre_words, hy_words, holder, is_training = True):
 
     W1 = dy.parameter(holder.W1)
     b1 = dy.parameter(holder.b1)
-    W12 = dy.parameter(holder.W12)
-    b12 = dy.parameter(holder.b12)
     W2 = dy.parameter(holder.W2)
     b2 = dy.parameter(holder.b2)
     # needs to be fixed (another layer + dropout)
-    mid1 = dy.rectify(W1 * final + b1)
-    if is_training:
-        mid1 = dy.dropout(mid1, 0.1)
-
-    mid2 = dy.rectify(W12 * mid1 + b12)
-
-    return W2 * mid2 + b2
+    mid = dy.rectify(W1 * final + b1)
+    # if is_training:
+    # b_tag = [dy.dropout(b, 0.1) for b in b_tag]
+    return W2 * mid + b2
 
 
 def predict_tags(pre_words, hy_words, holder):
-    vec = build_graph(pre_words, hy_words, holder, is_training=False)
+    vec = build_graph(pre_words, hy_words, holder)
     vec = dy.softmax(vec)
     prob = vec.npvalue()
     tag = np.argmax(prob) # make sure it returns the index
@@ -216,7 +209,7 @@ def evaluate_set2(set, holder):
 
 
 def calc_loss(pre_words, hy_words, tag,  holder):
-    vec = build_graph(pre_words, hy_words, holder, is_training=True)
+    vec = build_graph(pre_words, hy_words, holder)
     loss = dy.pickneglogsoftmax(vec, tag)
     return loss
 
@@ -287,7 +280,6 @@ def main():
     l3_hidden_dim = 1024
 
     mlpd = 800
-    mlpd2 = 256
 
 
     fwdRNN_layer1 = dy.LSTMBuilder(layers=1, input_dim=WORD_EMBED_SIZE, hidden_dim=l1_hidden_dim, model=model)
@@ -302,13 +294,10 @@ def main():
     W1 = model.add_parameters((mlpd, l3_hidden_dim * 2 * 4))
     b1 = model.add_parameters(mlpd)
 
-    W12 = model.add_parameters((mlpd2, mlpd))
-    b12 = model.add_parameters(mlpd2)
-
-    W2 = model.add_parameters((3, mlpd2))
+    W2 = model.add_parameters((3, mlpd))
     b2 = model.add_parameters(3)
 
-    holder = ComponentHolder(word2index, fwdRNN_layer1, bwdRNN_layer1, fwdRNN_layer2, bwdRNN_layer2, fwdRNN_layer3, bwdRNN_layer3, W1, b1, W12, b12, W2, b2, word_embedding)
+    holder = ComponentHolder(word2index, fwdRNN_layer1, bwdRNN_layer1, fwdRNN_layer2, bwdRNN_layer2, fwdRNN_layer3, bwdRNN_layer3, W1, b1, W2, b2, word_embedding)
 
     start_training_time = datetime.now()
     current_date = start_training_time.strftime("%d.%m.%Y")
