@@ -15,7 +15,7 @@ WORD_EMBED_SIZE = 300 # 300 IN PYTOCH MODEL
 EPOCHS = 5
 EVALUATE_ITERATION = 800#500
 
-method = 'another_mlp_and_dropout'
+method = 'larger_layers'
 
 dev_evaluation_file = 'dev_eval.txt'
 test_evaluation_file = 'test_eval.txt'
@@ -282,11 +282,11 @@ def main():
         word_embedding = model.add_lookup_parameters((vocab_size, WORD_EMBED_SIZE))
     trainer = dy.AdamTrainer(model)
 
-    l1_hidden_dim = 64
-    l2_hidden_dim = 128
-    l3_hidden_dim = 256
+    l1_hidden_dim = 256
+    l2_hidden_dim = 512
+    l3_hidden_dim = 1024
 
-    mlpd = 512
+    mlpd = 800
     mlpd2 = 256
 
 
