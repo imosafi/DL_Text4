@@ -275,9 +275,9 @@ def main():
         word_embedding = model.add_lookup_parameters((vocab_size, WORD_EMBED_SIZE))
     trainer = dy.AdamTrainer(model)
 
-    l1_hidden_dim = 256
-    l2_hidden_dim = 512
-    l3_hidden_dim = 1024
+    l1_hidden_dim = 128
+    l2_hidden_dim = 256
+    l3_hidden_dim = 512
 
     mlpd = 800
 
