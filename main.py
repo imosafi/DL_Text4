@@ -6,14 +6,12 @@ import sys
 from enum import Enum
 from collections import Counter
 import numpy as np
-import gc
 
-# WORD_EMBED_SIZE = 300
-SNLI_VOCAB_SIZE = 40000 # 42378 - real size
-BATCH_SIZE = 40 #250
-WORD_EMBED_SIZE = 300 # 300 IN PYTOCH MODEL
+SNLI_VOCAB_SIZE = 40000
+BATCH_SIZE = 40
+WORD_EMBED_SIZE = 300
 EPOCHS = 5
-EVALUATE_ITERATION = 800#500
+EVALUATE_ITERATION = 800
 
 method = 'larger_layers_no_dropout'
 
@@ -36,7 +34,6 @@ class TrainingOn(Enum):
     both = 3
 
 
-# args[1] => use pretrained
 def take_labels_0_1_2(trainset):
     return [t for t in trainset if t[2] != 3]
 
@@ -52,7 +49,6 @@ def split_into_batches(set, size):
     return [set[i:i + size] for i in range(0, len(set), size)]
 
 
-# naive implementation don't remove , ? etc.
 def get_set(file_name):
     trainset = []
     vocab = []
@@ -61,10 +57,6 @@ def get_set(file_name):
         parts = line.split(SEPERATION_STR)
         if not len(parts) == 3:
             raise Exception("more than 3 parts")
-        # if len(parts) == 2:
-        #     parts.append(parts[1][- 1])
-        #     # parts[2] = parts[1][- 1]
-        #     parts[1] = parts[1][::len(parts[1]) - 1]
         parts[0] = parts[0].strip('. \t').split()
         parts[1] = parts[1].strip('. \t').split()
         parts[2] = parts[2].strip('. \t')
@@ -112,8 +104,7 @@ def build_graph(pre_words, hy_words, holder):
     pre_wembs = [get_word_rep(w, holder) for w in pre_words]
     hy_wembs = [get_word_rep(w, holder) for w in hy_words]
 
-    # if is_training:
-    #     wembs = [dy.dropout(w, 0.1) for w in wembs]
+
     pre_fws = fl1_init.transduce(pre_wembs)
     pre_bws = bl1_init.transduce(reversed(pre_wembs))
 
@@ -159,10 +150,9 @@ def build_graph(pre_words, hy_words, holder):
     b1 = dy.parameter(holder.b1)
     W2 = dy.parameter(holder.W2)
     b2 = dy.parameter(holder.b2)
-    # needs to be fixed (another layer + dropout)
+
     mid = dy.rectify(W1 * final + b1)
-    # if is_training:
-    # b_tag = [dy.dropout(b, 0.1) for b in b_tag]
+
     return W2 * mid + b2
 
 
@@ -170,8 +160,7 @@ def predict_tags(pre_words, hy_words, holder):
     vec = build_graph(pre_words, hy_words, holder)
     vec = dy.softmax(vec)
     prob = vec.npvalue()
-    tag = np.argmax(prob) # make sure it returns the index
-    # tags.append(holder.index2tag[tag])
+    tag = np.argmax(prob)
     return tag
 
 
@@ -190,23 +179,6 @@ def evaluate_set2(set, holder):
     return good / (good + bad)
 
 
-# def evaluate_set(dev_batches, holder):
-#     good = 0.0
-#     bad = 0.0
-#     for i, item in enumerate(dev_batches):
-#         gc.collect()
-#         print 'evaluate batch {}'.format(i)
-#         for pre_sentence, hy_sentence, tag in item:
-#             pre_words = [word for word in pre_sentence]
-#             hy_words = [word for word in hy_sentence]
-#
-#             predicted_tag = predict_tags(pre_words, hy_words, holder)
-#             if tag == predicted_tag:
-#                 good += 1
-#             else:
-#                 bad += 1
-#     return good / (good + bad)
-
 
 def calc_loss(pre_words, hy_words, tag,  holder):
     vec = build_graph(pre_words, hy_words, holder)
@@ -218,29 +190,18 @@ def ensure_directory_exists(directory_path):
         os.makedirs(directory_path)
 
 
-# def save_results_and_model(evaluation_results, current_date, current_time, total_training_time, model):
-#     path = 'results/{}_{}'.format(current_date, current_time)
-#     ensure_directory_exists(path)
-#     with open(path + '/results.txt', 'w') as f:
-#         f.write('total training time: {}\n'.format(total_training_time))
-#         f.write('num of epochs: {}\n'.format(EPOCHS))
-#         f.write('evaluated every: {}\n'.format(EVALUATE_ITERATION))
-#     with open(path + '/' + 'evaluation.txt', 'w') as f:
-#         f.write(''.join([str(x) + ' ' for x in evaluation_results]))
-#     model.save(path + '/' + 'model1')
 
 
 def main():
     print 'reading and processing data'
-    vocab, trainset = get_set('data/snli/sequence/train.txt')
-    _, devset = get_set('data/snli/sequence/dev.txt')
-    _, testset = get_set('data/snli/sequence/test.txt')
+    vocab, trainset = get_set('data/snli/processed_data/train.txt')
+    _, devset = get_set('data/snli/processed_data/dev.txt')
+    _, testset = get_set('data/snli/processed_data/test.txt')
     rare_words = get_rare_words(vocab, SNLI_VOCAB_SIZE)
     ensure_directory_exists('results')
 
     train_batches = split_into_batches(trainset, BATCH_SIZE)
-    # dev_batches = split_into_batches(devset, BATCH_SIZE)
-    # test_bathces = split_into_batches(testset, BATCH_SIZE)
+
 
     word2index = {}
     vocab_size = None
@@ -269,7 +230,6 @@ def main():
 
 
 
-    # create label2index - not needed since the labels are exactly the numbers
     if not USE_PRETRINED:
         model = dy.Model()
         word_embedding = model.add_lookup_parameters((vocab_size, WORD_EMBED_SIZE))
@@ -329,15 +289,13 @@ def main():
                 tag = item[2]
                 loss = calc_loss(pre_words, hy_words, tag,  holder)
                 losses.append(loss)
-            loss_exp = dy.esum(losses) / len(losses)  # check if should be converted to float
+            loss_exp = dy.esum(losses) / len(losses)
             loss_exp.backward()
             trainer.update()
         print 'epoch took: ' + str(datetime.now() - pretrain_time)
 
     total_training_time = datetime.now() - start_training_time
     print 'total training time was {}'.format(total_training_time)
-
-    # save_results_and_model(evaluation_results, current_date, current_time, total_training_time, model)
 
 
 if __name__ == '__main__':
